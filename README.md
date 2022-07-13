@@ -2,18 +2,19 @@
 
 
 
-Arquitetura: 
+#### Arquitetura: 
  - Componentização
  - DDD, hexagonal, state, evento, constructor, singleton, strategy...
  - Teste Automatizado: Unitário, API, Integrado
  - Filas (rabbitMQ / Lambda...)
   
-Docker
+#### Containers
+ - Docker
  - Docker Hub
  - Kubernets
  - Minikube 
 
-Aws
+#### Aws
  - ACM Certificate Manager
  - Route53
  - ELB (load balancer)
@@ -24,12 +25,12 @@ Aws
  - Permissão 
  - CloudFront 
 
-BitBucket 
+#### BitBucket 
  - Criação
  - Branch Permission 
  - Pipeline 
  - Dia dia - PR Merge deploy
-
+#### Monitoramento Clusters
  - Healm
  - Terraform / CloudFormation
 

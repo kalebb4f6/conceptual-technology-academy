@@ -1,0 +1,141 @@
+image: python:3.7.4-alpine3.10
+
+definitions:
+  steps:
+    - step: &analyse-code
+        name: "Analyse Domains"
+        image: php:8.0.5-fpm-alpine
+        script:
+          - |
+            apk add --no-cache \
+              wget \
+              composer
+          
+            cd report/domains/admin && composer install --no-cache
+            ./vendor/bin/phpstan analyse --memory-limit=2G
+            
+#            cd ../consumer && composer install --no-cache
+#            ./vendor/bin/phpstan analyse --memory-limit=2G
+
+    - step: &push-app-container
+        name: "Build App"
+        services:
+          - docker
+        caches:
+          - pip
+        script:
+          - |
+            if [ -f ./report/printenv ]; then
+                export $(cat ./printenv | xargs)
+            fi
+
+          - pip3 install awscli
+
+          - aws configure set aws_access_key_id "${AWS_KEY}"
+          - aws configure set aws_secret_access_key "${AWS_SECRET}"
+          - eval $(aws ecr get-login --no-include-email --region sa-east-1 | sed 's;https://;;g')
+          - docker build -f docker/app/Dockerfile -t $IMAGE_REPOSITORY:$TAG .
+          - docker push $IMAGE_REPOSITORY:$TAG
+    - step: &publish-container
+        name: "Publish App K8s"
+        services:
+          - docker
+        caches:
+          - pip
+        script:
+          - |
+            if [ -f ./printenv ]; then
+                export $(cat ./printenv | xargs)
+            fi
+          - chmod -Rf 777 .k8s/versions/
+          - echo "Publish APP on eks cluster ${APP_CLUSTER_NAME}"
+          - pipe: atlassian/aws-eks-kubectl-run:1.4.1
+            variables:
+              AWS_ACCESS_KEY_ID: $AWS_KEY
+              AWS_SECRET_ACCESS_KEY: $AWS_SECRET
+              AWS_DEFAULT_REGION: 'sa-east-1'
+              CLUSTER_NAME: $APP_CLUSTER_NAME
+              KUBECTL_COMMAND: 'apply'
+              RESOURCE_PATH: ".k8s/versions/${TAG}.yml"
+    - step: &make-tag
+        name: Tag version
+        image: atlassian/default-image:2
+        script:
+          - |
+            if [ -f ./printenv ]; then
+                export $(cat ./printenv | xargs)
+            fi
+
+          - echo ${BITBUCKET_GIT_SSH_ORIGIN}
+          - git remote set-url origin ${BITBUCKET_GIT_SSH_ORIGIN}
+          - VERSION=production-v1.$BITBUCKET_BUILD_NUMBER
+          - echo $VERSION
+          - git tag $VERSION
+          - git push origin --tags
+
+pipelines:
+  pull-requests:
+    '**': #this runs as default for any branch not elsewhere defined
+      - step: *analyse-code
+  branches:
+    '**':
+      - step: *analyse-code
+    develop:
+#      - step: *analyse-code
+      - step:
+          name: "Set environment"
+          deployment: staging
+          script:
+            - export TAG="${PREFIX_TAG}-v1.${BITBUCKET_BUILD_NUMBER}"
+            - export APP_NAME="\"${APP_NAME}\""
+            - export APP_ENV="${APP_ENV}"
+            - export APP_DEBUG="${APP_DEBUG}"
+            - export APP_URL="${APP_URL}"
+            - export APP_KEY="${APP_KEY}"
+            - printenv
+            # Export some variables
+            - printenv | grep APP > printenv
+            - printenv | grep TAG= >> printenv
+          artifacts:
+            - printenv
+      - step: *push-app-container
+      - step: *publish-container
+
+
+    master:
+      - step:
+          name: "Set environment"
+          deployment: production
+          script:
+            - export TAG="${PREFIX_TAG}-v1.${BITBUCKET_BUILD_NUMBER}"
+            - export APP_NAME="\"${APP_NAME}\""
+            - export APP_ENV="${APP_ENV}"
+            - export APP_DEBUG="${APP_DEBUG}"
+            - export APP_URL="${APP_URL}"
+            - export APP_KEY="${APP_KEY}"
+            # Export some variables
+            - printenv | grep APP > printenv
+            - printenv | grep TAG= >> printenv
+            - printenv | grep SENTRY_AUTH_TOKEN= >> printenv
+          artifacts:
+            - printenv
+      - step: *push-app-container
+      - step:
+          name: "Generate Package and Publish new revision"
+          script:
+            - |
+              if [ -f ./printenv ]; then
+                  export $(cat ./printenv | xargs)
+              fi
+            - pipe: docker://kalborfon/bitbucket-pipe-helm-k8s:v1.2
+              variables:
+                NAMESPACE: "<namespace>"
+                AWS_KEY: $AWS_KEY
+                AWS_SECRET: $AWS_SECRET
+                EKS_CLUSTER: "<eks cluster>"
+                AWS_REGION: "<region>"
+                RELEASE_NAME: '<release name>'
+                HELM_COMMAND: 'upgrade' # this along with the next option allows the chart to be installed or upgraded
+                HELM_CHART_PATH: '<helm path>'
+                HELM_COMMAND_ARGS: '--set version=${TAG}' # and any other commands not supported, see the README for a full list of supported options
+      - step: *make-tag

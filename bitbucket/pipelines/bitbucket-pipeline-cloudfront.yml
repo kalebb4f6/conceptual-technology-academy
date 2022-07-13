@@ -1,0 +1,81 @@
+image: python:3.7.4-alpine3.10
+
+definitions:
+  steps:
+    - step: &build-app
+        name: "Create Dist"
+        image: node:14.15.0
+        caches:
+          - node
+        script:
+          - yarn
+          - yarn build
+        artifacts:
+          - build/**
+
+    - step: &make-tag
+        name: Tag version
+        image: atlassian/default-image:2
+        script:
+          - echo ${BITBUCKET_GIT_SSH_ORIGIN}
+          - git remote set-url origin ${BITBUCKET_GIT_SSH_ORIGIN}
+          - VERSION=production-v1.$BITBUCKET_BUILD_NUMBER
+          - echo $VERSION
+          - git tag $VERSION
+          - git push origin --tags
+
+pipelines:
+  branches:
+    develop:
+      - step:
+          name: "Set environment"
+          deployment: staging
+          script:
+            - export TAG="${PREFIX_TAG}-v1.${BITBUCKET_BUILD_NUMBER}"
+            # Export some variables
+            - printenv | grep ESLINT_ > .env
+            - printenv | grep REACT_APP >> .env
+            - printenv | grep TAG= >> .env
+          artifacts:
+            - .env
+      - step: *build-app
+
+
+    main:
+      - step:
+          name: "Set environment"
+          deployment: production
+          script:
+            - export TAG="${PREFIX_TAG}-v1.${BITBUCKET_BUILD_NUMBER}"
+            # Export some variables
+            - printenv | grep ESLINT_ > .env
+            - printenv | grep REACT_APP >> .env
+            - printenv | grep TAG= >> .env
+          artifacts:
+            - .env
+
+      - step: *build-app
+      - step:
+          name: Publish CDN Production
+          image: python:3.7.4-alpine3.10
+          script:
+            - |
+              if [ -f .env ]; then
+                  export $(cat .env | xargs)
+              fi
+            - pipe: atlassian/aws-s3-deploy:1.1.0 # Atualiza os arquivos no S3
+              variables:
+                AWS_SECRET_ACCESS_KEY: $AWS_SECRET
+                AWS_ACCESS_KEY_ID: $AWS_KEY
+                AWS_DEFAULT_REGION: '<region>'
+                S3_BUCKET: 'bucket/path'
+                LOCAL_PATH: 'build'
+                ACL: 'public-read'
+                DELETE_FLAG: "true"
+            - pipe: atlassian/aws-cloudfront-invalidate:0.6.0 # Renova o cache da cdn
+              variables:
+                AWS_SECRET_ACCESS_KEY: $AWS_SECRET
+                AWS_ACCESS_KEY_ID: $AWS_KEY
+                AWS_DEFAULT_REGION: '<region>'
+                DISTRIBUTION_ID: $DISTRIBUITION_CF
+
