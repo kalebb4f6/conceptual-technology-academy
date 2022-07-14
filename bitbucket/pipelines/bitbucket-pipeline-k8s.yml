@@ -75,12 +75,12 @@ definitions:
 
 pipelines:
   pull-requests:
-    '**': #this runs as default for any branch not elsewhere defined
+    master: #this runs as default for any branch not elsewhere defined
       - step: *analyse-code
   branches:
     '**':
       - step: *analyse-code
-    develop:
+    develop: 
 #      - step: *analyse-code
       - step:
           name: "Set environment"
