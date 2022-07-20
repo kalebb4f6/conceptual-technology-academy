@@ -1,0 +1,16 @@
+FROM nginx # declara imagem
+
+    RUN echo "iniciando ess cacetinha do nginx" # Rodar comandos 
+    # Qual Comando ?
+    # caguei, o q for comando roda ai, 
+    # a n ser q tenha q instalar algum pacote,
+    # adivinha, instala o pacote e depois roda o comando
+    COPY default.conf /etc/nginx/conf.d/default.conf 
+    # Copia arquivos do teu local para dentro da imagem
+    
+    EXPOSE 80
+    # Expoe a porta do serviço
+    # Vai precisar igual adicionar no comando o -p do comando docker run
+    # build exemplo: docker build --tag passaros_exoticos:latest
+    # exemplo: docker run --name caralhobelga -p 8080:8000 passaros_exoticos:latest
+    CMD ["nginx", "-g", "daemon off;"]
